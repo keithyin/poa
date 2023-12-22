@@ -37,7 +37,7 @@ impl AlignParams {
     }
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq, PartialOrd)]
 pub enum TransMode {
     START,
     MATCH,
@@ -98,6 +98,14 @@ impl AlignMatrix {
 
     pub fn get(&self, row: usize, col: usize) -> Option<AlignPosition> {
         return self.matrix[row][col];
+    }
+
+    pub fn get_max_score(&self) -> i32 {
+        self.max_score
+    }
+
+    pub fn get_max_score_positions(&self) -> &Vec<(usize, usize)> {
+        &self.max_score_positions
     }
 
 }

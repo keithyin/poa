@@ -2,7 +2,7 @@
 use std::collections::HashMap;
 
 use petgraph::{prelude::*, algo::toposort};
-use crate::alignment::{*, self};
+use crate::{alignment::{*, self}, dna_utils::reverse_complement};
 
 pub struct PartialOrderAlignment {
 
@@ -37,7 +37,7 @@ impl PartialOrderAlignment {
             return;
         }
 
-        self.add_more_read();
+        self.add_more_read(read);
     }
 
     fn add_first_read(&mut self, read: &[u8]) {
@@ -53,30 +53,33 @@ impl PartialOrderAlignment {
     }
 
     fn add_more_read(&mut self, read: &[u8]) {
+        let mut target = toposort(&self.graph, None).unwrap();
+        assert!(target[0] == self.begin_node_idx);
+        assert!(*target.last().unwrap() == self.end_node_idx);
+        target.pop();
+        target.remove(0);
 
-        let align_matrix_forward = self.alignment(read);
-        let alin_matrix_reverse_complement = 0;
+        let align_matrix_forward = self.alignment(&target, read);
+        let reverse_seq = reverse_complement(read);
+        let align_matrix_reverse_complement = self.alignment(&target, &reverse_seq);
+        if align_matrix_forward.get_max_score() > align_matrix_reverse_complement.get_max_score() {
+            self.commit_add(read, &align_matrix_forward);
+        } else {
+            self.commit_add(&reverse_seq, &align_matrix_reverse_complement);
+        }
+        self.num_reads += 1;
 
     }
 
-    fn alignment(&self, read: &[u8]) -> AlignMatrix{
-
-        let mut nodes = toposort(&self.graph, None).unwrap();
-        assert!(nodes[0] == self.begin_node_idx);
-        assert!(*nodes.last().unwrap() == self.end_node_idx);
-        
-        // remove the begin and end node
-        nodes.pop();
-        nodes.remove(0);
-
-        let node_idx_to_col_idx = nodes
+    fn alignment(&self, target: &Vec<NodeIndex>, read: &[u8]) -> AlignMatrix{
+        let node_idx_to_col_idx = target
             .iter()
             .enumerate()
             .map(|v| (*v.1, v.0))
             .collect::<HashMap<_, _>>();
 
         let matrix_rows = read.len() + 1;
-        let matrix_cols = nodes.len() + 1;
+        let matrix_cols = target.len() + 1;
         let mut align_matrix = AlignMatrix::new(matrix_rows, matrix_cols);
 
         for row in 0..matrix_rows {
@@ -99,7 +102,7 @@ impl PartialOrderAlignment {
         
         for row in 1..matrix_rows {
             for col in 1..matrix_cols {
-                let node_idx = nodes[col - 1];
+                let node_idx = target[col - 1];
                 let graph_node = self.graph.node_weight(node_idx).unwrap();
 
                 let mut align_position = match self.align_cfg.align_mode {
@@ -145,6 +148,58 @@ impl PartialOrderAlignment {
             }
         }
         align_matrix
+    }
+
+    /// 对齐的部分接上
+    /// 没有对齐的部分，接到头尾上
+    /// align_matrix: row is read, target is col
+    fn commit_add(&mut self, target: &Vec<NodeIndex>, read: &[u8], align_matrix: &AlignMatrix) {
+        let max_score_position = align_matrix.get_max_score_positions().last().unwrap();
+        
+        let read_end = max_score_position.0 - 1;
+        let target_end = max_score_position.1 - 1;
+
+        let mut read_cursor = read.len() - 1;
+        let mut target_cursor = target_end;
+        // read_cursor 对应的是 read 的索引，对于 matrix 的索引 需要+1
+        let mut next_node = self.end_node_idx;
+        while read_cursor > read_end {
+            let new_node = self.graph.add_node(PoaNode::new(read[read_cursor], 1));
+            self.graph.add_edge(new_node, next_node, PoaEdge::new(0));
+            next_node = new_node;
+            read_cursor -= 1;
+        }
+
+        loop {
+            let align_pos = align_matrix.get(read_cursor+1, target_cursor+1).unwrap(); 
+
+            let skip = match align_pos.pre_trans_mode {
+                TransMode::START => {
+                    true
+                },
+                TransMode::MATCH => {
+                    // let mut target_node = self.graph.node_weight_mut(a)
+
+                    read_cursor -= 1;
+                    target_cursor -= 1;
+                    false
+                },
+                TransMode::DELETE => {
+                    target_cursor -= 1;
+                    false
+                },
+                TransMode::INSERT => {
+                    read_cursor -= 1;
+                    false
+                },
+                _ => panic!("invalid"),
+            };
+
+            if skip {
+                break;
+            }
+        }
+
     }
 }
 
