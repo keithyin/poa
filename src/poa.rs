@@ -63,9 +63,9 @@ impl PartialOrderAlignment {
         let reverse_seq = reverse_complement(read);
         let align_matrix_reverse_complement = self.alignment(&target, &reverse_seq);
         if align_matrix_forward.get_max_score() > align_matrix_reverse_complement.get_max_score() {
-            self.commit_add(read, &align_matrix_forward);
+            self.commit_add(&target, read, &align_matrix_forward);
         } else {
-            self.commit_add(&reverse_seq, &align_matrix_reverse_complement);
+            self.commit_add(&target, &reverse_seq, &align_matrix_reverse_complement);
         }
         self.num_reads += 1;
 
@@ -163,6 +163,7 @@ impl PartialOrderAlignment {
         let mut target_cursor = target_end;
         // read_cursor 对应的是 read 的索引，对于 matrix 的索引 需要+1
         let mut next_node = self.end_node_idx;
+        
         while read_cursor > read_end {
             let new_node = self.graph.add_node(PoaNode::new(read[read_cursor], 1));
             self.graph.add_edge(new_node, next_node, PoaEdge::new(0));
@@ -178,8 +179,15 @@ impl PartialOrderAlignment {
                     true
                 },
                 TransMode::MATCH => {
-                    // let mut target_node = self.graph.node_weight_mut(a)
-
+                    let mut target_node = self.graph.node_weight_mut(target[target_cursor]).unwrap();
+                    if target_node.base == read[read_cursor] {
+                        target_node.num_reads += 1;
+                        next_node = target[target_cursor];
+                    } else {
+                        let new_node = self.graph.add_node(PoaNode::new(read[read_cursor], 1));
+                        self.graph.add_edge(new_node, next_node, PoaEdge::new(0));
+                        next_node = new_node;
+                    }
                     read_cursor -= 1;
                     target_cursor -= 1;
                     false
@@ -189,6 +197,9 @@ impl PartialOrderAlignment {
                     false
                 },
                 TransMode::INSERT => {
+                    let new_node = self.graph.add_node(PoaNode::new(read[read_cursor], 1));
+                    self.graph.add_edge(new_node, next_node, PoaEdge::new(0));
+                    next_node = new_node;
                     read_cursor -= 1;
                     false
                 },
@@ -199,6 +210,20 @@ impl PartialOrderAlignment {
                 break;
             }
         }
+
+        loop {
+            let new_node = self.graph.add_node(PoaNode::new(read[read_cursor], 1));
+            self.graph.add_edge(new_node, next_node, PoaEdge::new(0));
+            next_node = new_node;
+            if read_cursor == 0 {
+                break;
+            }
+            read_cursor -= 1;
+        }
+
+        self.graph.add_edge(self.begin_node_idx, next_node, PoaEdge::new(0));
+
+        
 
     }
 }
