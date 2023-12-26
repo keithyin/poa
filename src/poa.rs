@@ -1,5 +1,5 @@
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, LinkedList};
 
 use petgraph::{prelude::*, algo::toposort};
 use crate::{alignment::{*, self}, dna_utils::reverse_complement};
@@ -40,7 +40,7 @@ impl PartialOrderAlignment {
         self.add_more_read(read);
     }
 
-    pub fn get_consensus(&self) {
+    pub fn get_consensus(&self) -> LinkedList<NodeIndex>{
         let mut best_prev_node = HashMap::new();
         let mut best_reaching_score = f32::MIN;
         let mut best_node = None;
@@ -49,12 +49,34 @@ impl PartialOrderAlignment {
         assert!(vertices.remove(0) == self.begin_node_idx);
 
         for node in &vertices {
-            let mut cur_node_best_reaching_score = f32::MIN;
+            let cur_node_info = self.graph.node_weight(*node).unwrap();
+            let cur_node_score = (2 * cur_node_info.num_reads) as f32 - cur_node_info.num_spinning_reads as f32 - 0.0001_f32;
+            let mut cur_node_best_reaching_score = cur_node_score;
             let mut cur_node_best_reaching_node = None;
             for edge in self.graph.edges_directed(*node, Incoming) {
+                let reaching_score = self.graph.node_weight(edge.source()).unwrap().reaching_score + cur_node_score;
+                if reaching_score > cur_node_best_reaching_score {
+                    cur_node_best_reaching_score = reaching_score;
+                    cur_node_best_reaching_node = Some(edge.source());
+                }
+            }
+            best_prev_node.insert(*node, cur_node_best_reaching_node);
 
+            if cur_node_best_reaching_score > best_reaching_score {
+                best_reaching_score = cur_node_best_reaching_score;
+                best_node = cur_node_best_reaching_node;
             }
         }
+
+        let mut cursor = best_node;
+
+        let mut result = LinkedList::new();
+
+        while let Some(node) = cursor {
+            result.push_front(node);
+            cursor = *best_prev_node.get(&node).unwrap();
+        }
+        result
     }
 
     fn add_first_read(&mut self, read: &[u8]) {
@@ -200,6 +222,7 @@ impl PartialOrderAlignment {
         }
 
         loop {
+            // TODO: 记得fill num_spanning_reads的值！！！
             let align_pos = align_matrix.get(read_cursor+1, target_cursor+1).unwrap(); 
 
             let skip = match align_pos.pre_trans_mode {
