@@ -1,4 +1,4 @@
-use petgraph::graphmap::GraphMap;
+use petgraph::{graphmap::GraphMap, matrix_graph::MatrixGraph, csr::Csr};
 
 
 mod poa;
@@ -7,7 +7,7 @@ mod dna_utils;
 
 fn main() {
 
-    GraphMap::new();
+    // Csr::new()
 
     println!("Hello, world!");
 }

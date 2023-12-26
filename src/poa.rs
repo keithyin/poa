@@ -1,5 +1,5 @@
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use petgraph::{prelude::*, algo::toposort};
 use crate::{alignment::{*, self}, dna_utils::reverse_complement};
@@ -40,16 +40,44 @@ impl PartialOrderAlignment {
         self.add_more_read(read);
     }
 
+    pub fn get_consensus(&self) {
+        let mut best_prev_node = HashMap::new();
+        let mut best_reaching_score = f32::MIN;
+        let mut best_node = None;
+        let mut vertices = toposort(&self.graph, None).unwrap();
+        assert!(vertices.pop().unwrap() == self.end_node_idx);
+        assert!(vertices.remove(0) == self.begin_node_idx);
+
+        for node in &vertices {
+            let mut cur_node_best_reaching_score = f32::MIN;
+            let mut cur_node_best_reaching_node = None;
+            for edge in self.graph.edges_directed(*node, Incoming) {
+
+            }
+        }
+    }
+
     fn add_first_read(&mut self, read: &[u8]) {
         assert!(read.len() > 0 && self.num_reads == 0, "read.len={}, self.num_reads={}", read.len(), self.num_reads);
+
+        self.num_reads += 1;
+
         let mut pre_node_idx = self.begin_node_idx;
+        let mut real_start = None;
+        
         for base in read {
             let cur_node_idx = self.graph.add_node(PoaNode::new(*base, 1));
+            if real_start.is_none() {
+                real_start = Some(cur_node_idx);
+            }
             self.graph.add_edge(pre_node_idx, cur_node_idx, PoaEdge::new(0));
             pre_node_idx = cur_node_idx;
         }
         self.graph.add_edge(pre_node_idx, self.end_node_idx, PoaEdge::new(0));
-        self.num_reads += 1;
+
+        let spanning_nodes = self.spanning_dfs(real_start.unwrap(), pre_node_idx);
+        self.tag_spanning_nodes(&spanning_nodes)
+
     }
 
     fn add_more_read(&mut self, read: &[u8]) {
@@ -223,9 +251,65 @@ impl PartialOrderAlignment {
 
         self.graph.add_edge(self.begin_node_idx, next_node, PoaEdge::new(0));
 
-        
-
     }
+
+    /// start -> end 路径上所有可以经过的点
+    fn spanning_dfs(&self, start: NodeIndex, end: NodeIndex) -> Vec<NodeIndex>{
+        let mut spanning_nodes = vec![];
+
+        let mut fwd_visited = HashSet::new();
+        fwd_visited.insert(start);
+
+        let mut stack = vec![start];
+        loop {
+            if stack.is_empty() {
+                break;
+            }
+            let cur_node = stack.pop().unwrap();
+            for edge in self.graph.edges_directed(cur_node, Outgoing) {
+                if fwd_visited.contains(&edge.target()) {
+                    continue;
+                }
+
+                fwd_visited.insert(edge.target());
+                stack.push(edge.target());
+
+            }
+        }
+
+        let mut rev_visited = HashSet::new();
+        if fwd_visited.contains(&end) {
+
+            rev_visited.insert(end);
+            stack.push(end);
+
+        }
+        loop {
+            if stack.is_empty() {
+                break;
+            }
+            let cur_node = stack.pop().unwrap();
+            spanning_nodes.push(cur_node);
+
+            for edge in self.graph.edges_directed(cur_node, Incoming) {
+                if !fwd_visited.contains(&edge.source()) || rev_visited.contains(&edge.source()) {
+                    continue;
+                }
+                rev_visited.insert(edge.source());
+                stack.push(edge.target());
+            }
+
+        }
+
+        spanning_nodes
+    }
+
+    fn tag_spanning_nodes(&mut self, spanning_nodes: &Vec<NodeIndex>) {
+        for node in spanning_nodes {
+            self.graph.node_weight_mut(*node).unwrap().num_spinning_reads += 1;
+        }
+    }
+
 }
 
 
@@ -233,13 +317,21 @@ impl PartialOrderAlignment {
 pub struct PoaNode {
     base: u8,
     num_reads: u32,
-    num_spinning_reads: u32
+    num_spinning_reads: u32,
+
+    score: f32,
+    reaching_score: f32
 
 }
 
 impl PoaNode {
     pub fn new(base: u8, num_reads: u32) -> Self {
-        PoaNode{base, num_reads, num_spinning_reads: 0}
+        PoaNode{
+            base, 
+            num_reads, 
+            num_spinning_reads: 0, 
+            score: 0_f32, 
+            reaching_score: 0_f32}
     }
 }
 
